@@ -1,0 +1,55 @@
+# Build directories
+build/
+build-*/
+
+# Backup directories
+bk/
+bk*/
+
+# IDE files
+.vscode/
+.vs/
+*.vcxproj*
+*.sln
+
+# Compiled binaries
+*.exe
+*.out
+yolov11-tensorrt
+
+# Model files
+*.engine
+*.onnx
+*.weights
+*.pt
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Object files
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+
+# Debug files
+*.pdb
+*.ilk
+
+# Personal notes (not part of project)
+LINKEDIN_POST_SUGGESTIONS.md
