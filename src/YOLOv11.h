@@ -20,6 +20,7 @@ public:
     void preprocess(Mat& image);
     void infer();
     void postprocess(vector<Detection>& output);
+    void postprocess_sync(vector<Detection>& output); // Synchronous version for current frame
     void postprocess_start_next_copy(); // Start copy for next frame
     void draw(Mat& image, const vector<Detection>& output);
     void drawTimingInfo(Mat& image);

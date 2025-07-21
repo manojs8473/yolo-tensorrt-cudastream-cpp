@@ -291,6 +291,124 @@ void YOLOv11::postprocess(vector<Detection>& output)
     frame_count++;
 }
 
+void YOLOv11::postprocess_sync(vector<Detection>& output)
+{
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // Direct synchronous copy of current frame (no double buffering)
+    CUDA_CHECK(cudaMemcpy(cpu_output_buffer, gpu_buffers[1], 
+                         detection_attribute_size * num_detections * sizeof(float), 
+                         cudaMemcpyDeviceToHost));
+    
+    auto memcpy_end = std::chrono::high_resolution_clock::now();
+    float memcpy_time = std::chrono::duration<float, std::milli>(memcpy_end - start).count();
+
+    // Pre-allocate vectors to avoid reallocations
+    vector<Rect> boxes;
+    vector<int> class_ids;
+    vector<float> confidences;
+    
+    // Estimate ~10% of detections pass threshold for typical scenes
+    int estimated_detections = num_detections / 10;
+    boxes.reserve(estimated_detections);
+    class_ids.reserve(estimated_detections);
+    confidences.reserve(estimated_detections);
+
+    // Direct pointer access - column-major format (detection_attribute_size x num_detections)
+    const float* data = cpu_output_buffer;
+    
+    auto score_loop_start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < num_detections; ++i) {
+        // Manual argmax - optimized with direct pointer access
+        float max_score = -1.0f;
+        int max_class_id = -1;
+        
+        // Find class with highest score - column-major memory layout
+        for (int j = 0; j < num_classes; ++j) {
+            float score = data[(4 + j) * num_detections + i];
+            if (score > max_score) {
+                max_score = score;
+                max_class_id = j;
+            }
+        }
+
+        if (max_score > conf_threshold) {
+            const float cx = data[0 * num_detections + i];
+            const float cy = data[1 * num_detections + i];
+            const float ow = data[2 * num_detections + i];
+            const float oh = data[3 * num_detections + i];
+            Rect box;
+            box.x = static_cast<int>((cx - 0.5 * ow));
+            box.y = static_cast<int>((cy - 0.5 * oh));
+            box.width = static_cast<int>(ow);
+            box.height = static_cast<int>(oh);
+
+            boxes.push_back(box);
+            class_ids.push_back(max_class_id);
+            confidences.push_back(max_score);
+        }
+    }
+    
+    auto score_loop_end = std::chrono::high_resolution_clock::now();
+    float score_loop_time = std::chrono::duration<float, std::milli>(score_loop_end - score_loop_start).count();
+
+    auto nms_start = std::chrono::high_resolution_clock::now();
+    vector<int> nms_result;
+    dnn::NMSBoxes(boxes, confidences, conf_threshold, nms_threshold, nms_result);
+    auto nms_end = std::chrono::high_resolution_clock::now();
+    float nms_time = std::chrono::duration<float, std::milli>(nms_end - nms_start).count();
+
+    // Calculate scaling ratios
+    const float ratio_h = input_h / (float)original_image_height;
+    const float ratio_w = input_w / (float)original_image_width;
+    
+    for (int i = 0; i < nms_result.size(); i++)
+    {
+        Detection result;
+        int idx = nms_result[i];
+        result.class_id = class_ids[idx];
+        result.conf = confidences[idx];
+        
+        // Scale coordinates back to original image size
+        Rect box = boxes[idx];
+        if (ratio_h > ratio_w)
+        {
+            box.x = box.x / ratio_w;
+            box.y = (box.y - (input_h - ratio_w * original_image_height) / 2) / ratio_w;
+            box.width = box.width / ratio_w;
+            box.height = box.height / ratio_w;
+        }
+        else
+        {
+            box.x = (box.x - (input_w - ratio_h * original_image_width) / 2) / ratio_h;
+            box.y = box.y / ratio_h;
+            box.width = box.width / ratio_h;
+            box.height = box.height / ratio_h;
+        }
+        
+        result.bbox = box;
+        output.push_back(result);
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    postprocess_time = std::chrono::duration<float, std::milli>(end - start).count();
+    
+    // Print detailed timing breakdown (only for first few frames)
+    static int sync_frame_count = 0;
+    if (sync_frame_count < 5) {
+        printf("Sync Postprocess breakdown - Frame %d:\n", sync_frame_count);
+        printf("  Memory copy: %.2f ms\n", memcpy_time);
+        printf("  Score loop: %.2f ms\n", score_loop_time);
+        printf("  NMS: %.2f ms\n", nms_time);
+        printf("  Total: %.2f ms\n", postprocess_time);
+        printf("  Candidate boxes: %zu\n", boxes.size());
+        printf("  Final detections: %zu\n", nms_result.size());
+        printf("---\n");
+    }
+    sync_frame_count++;
+}
+
 void YOLOv11::postprocess_start_next_copy() {
     // Start copying the next frame's data while current frame is being processed
     float* next_cpu_buffer = (current_buffer_idx == 0) ? cpu_output_buffer_alt : cpu_output_buffer;

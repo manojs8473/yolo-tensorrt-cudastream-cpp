@@ -160,11 +160,12 @@ int main(int argc, char** argv)
 
             // Start next frame's memory copy immediately after inference
             // This overlaps the copy with current frame's processing
-            model.postprocess_start_next_copy();
+            //model.postprocess_start_next_copy();
 
             if (frame_count == 0) printf("Starting postprocess...\n");
-            model.postprocess(objects);
-            
+            //model.postprocess(objects);
+            model.postprocess_sync(objects);
+
             if (frame_count == 0) printf("Drawing results...\n");
             model.draw(image, objects);
             model.drawTimingInfo(image);

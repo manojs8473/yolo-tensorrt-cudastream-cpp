@@ -240,6 +240,78 @@ GPU Prep → TensorRT → CPU Copy → NMS → OpenCV
 - **Postprocess**: ~6.5ms (CPU optimized)
 - **Memory Copy**: ~0.2ms (hidden by streaming)
 
+## 🔌 API Integration
+
+### Basic Integration
+```cpp
+#include "YOLOv11.h"
+#include "detection_types.h"
+
+// Initialize model
+YOLOv11 model("model.engine", logger, 0.5f);
+
+// Process frame
+vector<Detection> objects;
+model.preprocess(image);  // OpenCV Mat input
+model.infer();            // TensorRT inference
+model.postprocess_sync(objects);  // Get results in original image coordinates
+
+// Use detections
+for (const auto& detection : objects) {
+    cv::Rect bbox = detection.bbox;  // Already scaled to original image
+    float confidence = detection.conf;
+    int class_id = detection.class_id;
+}
+```
+
+### Postprocessing Options
+
+#### Option 1: Synchronous (Perfect Frame Sync)
+```cpp
+model.preprocess(image);
+model.infer();
+model.postprocess_sync(objects);  // Current frame results immediately
+model.draw(image, objects);
+```
+**Benefits:**
+- ✅ Perfect frame synchronization
+- ✅ Coordinates in original image space
+- ✅ Simpler integration
+- ⚠️ ~5-10ms slower than streaming
+
+#### Option 2: Streaming (Maximum Performance)
+```cpp
+model.preprocess(image);
+model.infer();
+model.postprocess_start_next_copy();  // Start async copy
+model.postprocess(objects);           // Process previous frame
+model.draw(image, objects);
+```
+**Benefits:**
+- ✅ Maximum throughput (125+ FPS)
+- ✅ Overlapped memory transfers
+- ⚠️ 1-frame delay in results
+- ⚠️ More complex for integration
+
+### Detection Output Format
+```cpp
+struct Detection {
+    float conf;        // Confidence score
+    int class_id;      // Class index
+    cv::Rect bbox;     // Bounding box in original image coordinates
+};
+```
+
+### Multi-GPU Support
+```cpp
+// Set GPU per thread before creating model
+void worker_thread(int gpu_id) {
+    cudaSetDevice(gpu_id);  // Set once per thread
+    YOLOv11 model("model.engine", logger);
+    // All operations use this GPU
+}
+```
+
 ## 📚 Development Notes
 
 ### Project Structure
