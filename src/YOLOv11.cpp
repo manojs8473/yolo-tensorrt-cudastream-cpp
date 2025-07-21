@@ -136,6 +136,10 @@ YOLOv11::~YOLOv11()
 void YOLOv11::preprocess(Mat& image) {
     auto start = std::chrono::high_resolution_clock::now();
     
+    // Store original image dimensions for scaling in postprocess
+    original_image_width = image.cols;
+    original_image_height = image.rows;
+    
     // Preprocessing data on gpu
     cuda_preprocess(image.ptr(), image.cols, image.rows, gpu_buffers[0], input_w, input_h, stream);
     CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -234,13 +238,35 @@ void YOLOv11::postprocess(vector<Detection>& output)
     auto nms_end = std::chrono::high_resolution_clock::now();
     float nms_time = std::chrono::duration<float, std::milli>(nms_end - nms_start).count();
 
+    // Calculate scaling ratios
+    const float ratio_h = input_h / (float)original_image_height;
+    const float ratio_w = input_w / (float)original_image_width;
+    
     for (int i = 0; i < nms_result.size(); i++)
     {
         Detection result;
         int idx = nms_result[i];
         result.class_id = class_ids[idx];
         result.conf = confidences[idx];
-        result.bbox = boxes[idx];
+        
+        // Scale coordinates back to original image size
+        Rect box = boxes[idx];
+        if (ratio_h > ratio_w)
+        {
+            box.x = box.x / ratio_w;
+            box.y = (box.y - (input_h - ratio_w * original_image_height) / 2) / ratio_w;
+            box.width = box.width / ratio_w;
+            box.height = box.height / ratio_w;
+        }
+        else
+        {
+            box.x = (box.x - (input_w - ratio_h * original_image_width) / 2) / ratio_h;
+            box.y = box.y / ratio_h;
+            box.width = box.width / ratio_h;
+            box.height = box.height / ratio_h;
+        }
+        
+        result.bbox = box;
         output.push_back(result);
     }
     
@@ -334,9 +360,7 @@ bool YOLOv11::saveEngine(const std::string& onnxpath)
 
 void YOLOv11::draw(Mat& image, const vector<Detection>& output)
 {
-    const float ratio_h = input_h / (float)image.rows;
-    const float ratio_w = input_w / (float)image.cols;
-
+    // Coordinates are now already scaled to original image size in postprocess
     for (int i = 0; i < output.size(); i++)
     {
         auto detection = output[i];
@@ -344,21 +368,6 @@ void YOLOv11::draw(Mat& image, const vector<Detection>& output)
         auto class_id = detection.class_id;
         auto conf = detection.conf;
         cv::Scalar color = cv::Scalar(COLORS[class_id][0], COLORS[class_id][1], COLORS[class_id][2]);
-
-        if (ratio_h > ratio_w)
-        {
-            box.x = box.x / ratio_w;
-            box.y = (box.y - (input_h - ratio_w * image.rows) / 2) / ratio_w;
-            box.width = box.width / ratio_w;
-            box.height = box.height / ratio_w;
-        }
-        else
-        {
-            box.x = (box.x - (input_w - ratio_h * image.cols) / 2) / ratio_h;
-            box.y = box.y / ratio_h;
-            box.width = box.width / ratio_h;
-            box.height = box.height / ratio_h;
-        }
 
         rectangle(image, Point(box.x, box.y), Point(box.x + box.width, box.y + box.height), color, 3);
 

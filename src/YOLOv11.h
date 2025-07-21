@@ -58,6 +58,10 @@ private:
     const int MAX_IMAGE_SIZE = 4096 * 4096;
     float conf_threshold = 0.5f;
     float nms_threshold = 0.4f;
+    
+    // Original image dimensions for coordinate scaling
+    int original_image_width;
+    int original_image_height;
 
     vector<Scalar> colors;
 
